@@ -1,0 +1,74 @@
+# 一体化部署：网站 + Douyin_TikTok_Download_API（dtk/ 子模块）
+#
+#   docker compose up -d --build          # 启动全部服务
+#   docker compose logs api               # 首次启动时找初始化链接
+#   docker compose --profile https up -d  # 在服务器上加 HTTPS（需要 .env 里的 DOMAIN）
+#
+# 项目名固定为 dtk，和单独部署解析服务时一致，数据卷（数据库、身份池）会沿用。
+name: dtk
+
+include:
+  # 解析服务的全部服务：postgres、redis、migrate、api、worker、browser-rpc 等。
+  # 它们的配置读取 dtk/.env，参见 dtk/docker/README.md。
+  - path: dtk/docker/compose.yml
+
+services:
+  web:
+    build: .
+    image: douyin-web:latest
+    environment:
+      # 走 Docker 内部网络直连解析服务，不经过公网
+      DTK_BASE_URL: http://api:8000
+      DTK_API_KEY: ${DTK_API_KEY:?在 .env 中设置 DTK_API_KEY}
+    ports:
+      # 默认只在本机开放；局域网访问改成 WEB_BIND_HOST=0.0.0.0，
+      # 服务器上用 https profile 让 Caddy 对外提供服务
+      - "${WEB_BIND_HOST:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+    networks:
+      - edge
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    profiles:
+      - https
+    image: caddy:2.10-alpine
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - edge
+    depends_on:
+      - web
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy-data:
+  caddy-config:

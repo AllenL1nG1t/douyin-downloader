@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.gitmodules
+dtk
+deploy
+.claude
+.env
+.env*
+!.env.example
+Dockerfile
+compose.yaml
+*.md

@@ -1,0 +1,5 @@
+# 自动申请并续期 HTTPS 证书。DOMAIN 来自项目根目录的 .env
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy web:3000
+}

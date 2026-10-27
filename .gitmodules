@@ -1,0 +1,3 @@
+[submodule "dtk"]
+	path = dtk
+	url = https://github.com/Evil0ctal/Douyin_TikTok_Download_API.git

@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { isAllowedUrl, MOBILE_UA } from "@/lib/douyin";
 
 export const runtime = "nodejs";
-export const preferredRegion = ["hkg1"];
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
