@@ -38,6 +38,15 @@ export function extractDouyinUrl(text: string): string | null {
   return m[0];
 }
 
+/** 一个可选画质：同一分辨率只保留码率最高的那路 */
+export interface VideoQuality {
+  url: string;
+  width?: number;
+  height?: number;
+  bitrate?: number;
+  size?: number;
+}
+
 /** 前端展示用的统一结构 */
 export interface ParsedItem {
   id: string;
@@ -45,7 +54,7 @@ export interface ParsedItem {
   title: string;
   author: { nickname: string; avatar?: string };
   cover?: string;
-  video?: { url: string; width?: number; height?: number; duration?: number };
+  video?: { url: string; width?: number; height?: number; duration?: number; qualities?: VideoQuality[] };
   images?: string[];
   music?: { title?: string; url?: string };
 }

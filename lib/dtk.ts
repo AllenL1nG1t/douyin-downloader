@@ -1,7 +1,7 @@
 // 调用自部署的 Douyin_TikTok_Download_API（v1 REST API）
 // 文档：https://github.com/Evil0ctal/Douyin_TikTok_Download_API/blob/main/documents/zh/11-api.md
 
-import { ParseError, type ParsedItem } from "./douyin";
+import { ParseError, type ParsedItem, type VideoQuality } from "./douyin";
 
 // 单次 ?wait= 的秒数，不能超过服务端 api.max_wait_seconds（默认 30）
 const WAIT_SECONDS = 25;
@@ -108,6 +108,30 @@ function firstUrl(img: any): string | undefined {
   return img?.url || img?.urls?.[0] || undefined;
 }
 
+/**
+ * media.streams 是同一视频的多路转码（分辨率 × 码率 × 编码）。
+ * 每个分辨率只留码率最高的一路，按清晰度从高到低排，作为可选画质。
+ */
+function toQualities(streams: any[] | undefined): VideoQuality[] {
+  const best = new Map<number, VideoQuality>();
+  for (const s of streams ?? []) {
+    const url = s?.url || s?.urls?.[0];
+    if (!url || s.watermark) continue;
+    const q: VideoQuality = {
+      url,
+      width: s.width ?? undefined,
+      height: s.height ?? undefined,
+      bitrate: s.bitrate ?? undefined,
+      size: s.size_bytes ?? undefined,
+    };
+    // 横屏视频 height 才是常说的 1080p，竖屏则是 width，取短边
+    const key = Math.min(q.width ?? Infinity, q.height ?? Infinity);
+    const prev = best.get(key);
+    if (!prev || (q.bitrate ?? 0) > (prev.bitrate ?? 0)) best.set(key, q);
+  }
+  return [...best.entries()].sort((a, b) => b[0] - a[0]).map(([, q]) => q);
+}
+
 /** 把服务返回的 Content 映射成前端使用的结构 */
 export function toParsedItem(c: any): ParsedItem {
   if (!c?.content_id) throw new ParseError("解析服务返回的数据不完整", 502);
@@ -143,6 +167,7 @@ export function toParsedItem(c: any): ParsedItem {
       width: v.width ?? undefined,
       height: v.height ?? undefined,
       duration: c.duration_ms ?? undefined,
+      qualities: toQualities(media.streams),
     };
   }
   return item;

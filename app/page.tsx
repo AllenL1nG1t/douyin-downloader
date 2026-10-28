@@ -8,9 +8,27 @@ interface ParsedItem {
   title: string;
   author: { nickname: string; avatar?: string };
   cover?: string;
-  video?: { url: string; width?: number; height?: number; duration?: number };
+  video?: { url: string; width?: number; height?: number; duration?: number; qualities?: VideoQuality[] };
   images?: string[];
   music?: { title?: string; url?: string };
+}
+
+interface VideoQuality {
+  url: string;
+  width?: number;
+  height?: number;
+  bitrate?: number;
+  size?: number;
+}
+
+function qualityLabel(q: VideoQuality) {
+  const p = Math.min(q.width ?? Infinity, q.height ?? Infinity);
+  return Number.isFinite(p) ? `${p}p` : "原画";
+}
+
+function formatSize(bytes?: number) {
+  if (!bytes) return "";
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
 }
 
 function downloadHref(url: string, name: string, ext: string) {
@@ -29,6 +47,11 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [item, setItem] = useState<ParsedItem | null>(null);
+  const [qualityIndex, setQualityIndex] = useState(0);
+
+  const qualities = item?.video?.qualities ?? [];
+  const selected = qualities[qualityIndex];
+  const videoUrl = selected?.url ?? item?.video?.url;
 
   async function onParse(e?: React.FormEvent) {
     e?.preventDefault();
@@ -36,6 +59,7 @@ export default function Home() {
     setLoading(true);
     setError("");
     setItem(null);
+    setQualityIndex(0);
     try {
       const res = await fetch("/api/parse", {
         method: "POST",
@@ -102,14 +126,31 @@ export default function Home() {
           </div>
           <p className="title">{item.title}</p>
 
-          {item.type === "video" && item.video && (
+          {item.type === "video" && item.video && videoUrl && (
             <>
-              <video className="player" src={item.video.url} poster={item.cover} controls playsInline preload="none" />
+              <video className="player" src={videoUrl} poster={item.cover} controls playsInline preload="none" />
+              {qualities.length > 1 && (
+                <div className="qualities" role="radiogroup" aria-label="画质">
+                  {qualities.map((q, i) => (
+                    <button
+                      key={q.url}
+                      type="button"
+                      role="radio"
+                      aria-checked={i === qualityIndex}
+                      className={`chip${i === qualityIndex ? " active" : ""}`}
+                      onClick={() => setQualityIndex(i)}
+                    >
+                      {qualityLabel(q)}
+                      {q.size ? <span className="chip-sub">{formatSize(q.size)}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="actions">
-                <a className="btn primary" href={downloadHref(item.video.url, item.title, "mp4")}>
-                  下载无水印视频
+                <a className="btn primary" href={downloadHref(videoUrl, selected ? `${item.title}_${qualityLabel(selected)}` : item.title, "mp4")}>
+                  下载无水印视频{selected ? `（${qualityLabel(selected)}）` : ""}
                 </a>
-                <a className="btn ghost" href={item.video.url} target="_blank" rel="noreferrer">
+                <a className="btn ghost" href={videoUrl} target="_blank" rel="noreferrer">
                   打开原地址
                 </a>
               </div>
