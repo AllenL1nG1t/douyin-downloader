@@ -1,0 +1,95 @@
+From 48d06d533f554732f3e36f2984bc6485e88a5b42 Mon Sep 17 00:00:00 2001
+From: AllenL1nG1t <151384857+AllenL1nG1t@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 23:41:24 -0400
+Subject: [PATCH] Parse Douyin mix posts with cursor-based paging
+
+The mix aweme endpoint pages by `cursor` rather than `max_cursor`, so
+reusing parse_author_posts rejected mixes with a second page. Add a
+dedicated parse_mix_posts that reads `cursor` (falling back to
+`max_cursor`) and use it in the Douyin adapter.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/dtk/platforms/douyin/adapter.py    |  2 +-
+ src/dtk/platforms/douyin/parser.py     | 21 +++++++++++++++++++++
+ tests/replay/test_discovery_parsers.py | 12 ++++++++++++
+ 3 files changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/src/dtk/platforms/douyin/adapter.py b/src/dtk/platforms/douyin/adapter.py
+index 5bf03c7..4275ce6 100644
+--- a/src/dtk/platforms/douyin/adapter.py
++++ b/src/dtk/platforms/douyin/adapter.py
+@@ -223,7 +223,7 @@ class DouyinAdapter:
+         return parser.parse_author_mixes(payload)
+ 
+     def parse_mix_posts(self, payload: Mapping[str, Any], *, fetched_at: datetime) -> Page[Content]:
+-        return parser.parse_author_posts(payload, fetched_at=fetched_at)
++        return parser.parse_mix_posts(payload, fetched_at=fetched_at)
+ 
+     def parse_live_room(
+         self, payload: Mapping[str, Any], *, room_id: str | None = None
+diff --git a/src/dtk/platforms/douyin/parser.py b/src/dtk/platforms/douyin/parser.py
+index 7c7c5be..9850bc7 100644
+--- a/src/dtk/platforms/douyin/parser.py
++++ b/src/dtk/platforms/douyin/parser.py
+@@ -437,6 +437,26 @@ def parse_author_posts(payload: Mapping[str, Any], *, fetched_at: datetime) -> P
+     return Page(items=items, cursor=cursor, has_more=has_more)
+ 
+ 
++def parse_mix_posts(payload: Mapping[str, Any], *, fetched_at: datetime) -> Page[Content]:
++    """Parse ``/aweme/v1/web/mix/aweme/``.
++
++    The same ``aweme_list`` envelope as ``author_posts``, but the request pages
++    by ``cursor`` and so does the response: a live mix with a second page came
++    back with ``has_more`` and ``cursor`` and no ``max_cursor``, which
++    :func:`parse_author_posts` rejected. ``max_cursor`` is still read when
++    ``cursor`` is absent, in case Douyin answers some mixes the older way.
++    """
++    root = _guard(payload)
++    items = [content_from_node(item, fetched_at=fetched_at) for item in root.children("aweme_list")]
++    has_more = optional_bool(root.present("has_more"))
++    cursor = None
++    if has_more:
++        cursor = optional_id(root.get("cursor")) or optional_id(root.get("max_cursor"))
++        if cursor is None:
++            raise root.missing("cursor")
++    return Page(items=items, cursor=cursor, has_more=has_more)
++
++
+ #: The ``status`` on a ``collects_list`` entry that means "anyone can open it".
+ #:
+ #: Measured 2026-09-14 on one account holding two folders it had set either
+@@ -1026,6 +1046,7 @@ __all__ = [
+     "parse_live_room",
+     "parse_live_room_by_id",
+     "parse_live_status",
++    "parse_mix_posts",
+     "parse_music_detail",
+     "parse_music_posts",
+     "parse_related_posts",
+diff --git a/tests/replay/test_discovery_parsers.py b/tests/replay/test_discovery_parsers.py
+index 1664976..c345f3a 100644
+--- a/tests/replay/test_discovery_parsers.py
++++ b/tests/replay/test_discovery_parsers.py
+@@ -523,6 +523,18 @@ def test_douyin_and_tiktok_mix_posts_still_read_the_author_list_envelope(name: s
+     assert page.items
+ 
+ 
++def test_douyin_mix_posts_page_by_cursor_not_max_cursor() -> None:
++    payload = without(load("douyin", "user_posts_page1"), "max_cursor")
++    payload["has_more"] = 1
++    payload["cursor"] = 20
++
++    page = get_adapter("douyin").parse_mix_posts(payload, fetched_at=FETCHED_AT)
++
++    assert page.items
++    assert page.has_more is True
++    assert page.cursor == "20"
++
++
+ @pytest.mark.parametrize("name", ["douyin", "tiktok", "bilibili"])
+ def test_mixes_resolve_through_the_registry(name: str) -> None:
+     definition = registry.definition_for(f"{name}.author_mixes")
+-- 
+2.53.0.windows.1
+

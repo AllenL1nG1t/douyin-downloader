@@ -18,6 +18,7 @@
 ```bash
 git clone --recurse-submodules <你的仓库地址>
 cd <仓库目录>
+git -C dtk apply ../patches/dtk-mix-cursor.patch   # 修复合集翻页，见 patches/
 ```
 
 **1. 解析服务的配置 `dtk/.env`**：按 `dtk/docker/README.md` 用随机值生成，再加一行
@@ -63,7 +64,7 @@ Caddy 会自动申请和续期证书。解析服务控制台始终只监听服�
 | 查看状态 | `docker compose ps` |
 | 查看网站日志 | `docker compose logs -f web` |
 | 更新网站代码后重建 | `docker compose up -d --build web` |
-| 升级解析服务 | `git -C dtk pull && docker compose up -d --build`（先看它的更新说明） |
+| 升级解析服务 | `git -C dtk pull && docker compose up -d --build`（先看它的更新说明；之后重新应用 `patches/` 里的补丁） |
 | 停止（保留数据） | `docker compose down` |
 
 ## 本地开发网站
