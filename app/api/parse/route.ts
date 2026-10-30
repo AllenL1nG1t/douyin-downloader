@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extractDouyinUrl, ParseError } from "@/lib/douyin";
-import { parseWithDtk } from "@/lib/dtk";
+import { extractDouyinUrl, ParseError, resolveMixId } from "@/lib/douyin";
+import { fetchMixWithDtk, parseWithDtk } from "@/lib/dtk";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 合集要逐页翻，比单个作品慢
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   let text = "";
@@ -27,6 +28,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // 合集链接直接返回整个合集，其余按单个作品解析
+    const mixId = await resolveMixId(url);
+    if (mixId) {
+      return NextResponse.json({ mix: await fetchMixWithDtk(mixId) });
+    }
     const data = await parseWithDtk(url);
     return NextResponse.json({ data });
   } catch (e) {

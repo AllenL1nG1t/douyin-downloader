@@ -1,7 +1,7 @@
 // 调用自部署的 Douyin_TikTok_Download_API（v1 REST API）
 // 文档：https://github.com/Evil0ctal/Douyin_TikTok_Download_API/blob/main/documents/zh/11-api.md
 
-import { ParseError, type ParsedItem, type VideoQuality } from "./douyin";
+import { isValidMixId, ParseError, type MixInfo, type ParsedItem, type ParsedMix, type VideoQuality } from "./douyin";
 
 // 单次 ?wait= 的秒数，不能超过服务端 api.max_wait_seconds（默认 30）
 const WAIT_SECONDS = 25;
@@ -72,14 +72,12 @@ function toError(err: { code: string; message: string } | null | undefined): Par
   return new ParseError(known ?? err.message ?? "解析失败，请稍后重试", err.code === "RATE_LIMITED" ? 429 : 422);
 }
 
-/** 提交解析任务，并等到出结果，返回 Content 对象 */
-async function fetchContent(url: string): Promise<any> {
+/** 提交任务并等到出结果，返回任务的结果数据（作品、分页等） */
+async function runTask(path: string, init: RequestInit = {}): Promise<any> {
   const deadline = Date.now() + TOTAL_TIMEOUT_MS;
 
-  const { status, body } = await call(`/api/v1/parse?wait=${WAIT_SECONDS}`, {
-    method: "POST",
-    body: JSON.stringify({ url }),
-  });
+  const sep = path.includes("?") ? "&" : "?";
+  const { status, body } = await call(`${path}${sep}wait=${WAIT_SECONDS}`, init);
   if (!body.success) throw toError(body.error);
 
   // 202：时限内还没完成，任务仍在跑，用 task_id 继续轮询
@@ -97,7 +95,7 @@ async function fetchContent(url: string): Promise<any> {
     throw new ParseError("解析超时，请稍后重试", 504);
   }
 
-  // ?wait= 等到结果时，data 就是作品本身；兼容万一返回的是任务载荷
+  // ?wait= 等到结果时，data 就是结果本身；兼容万一返回的是任务载荷
   const data = body.data;
   if (data?.state === "done" && data?.data) return data.data;
   if (data?.state === "failed") throw toError(data.error);
@@ -173,6 +171,73 @@ export function toParsedItem(c: any): ParsedItem {
   return item;
 }
 
+/** 抖音原始数据里的 mix_info：作品属于哪个合集 */
+function toMixInfo(raw: any): MixInfo | undefined {
+  const m = raw?.mix_info;
+  const id = m?.mix_id != null ? String(m.mix_id) : "";
+  if (!isValidMixId(id)) return undefined;
+  return {
+    id,
+    name: m.mix_name || "合集",
+    count: m.statis?.updated_to_episode ?? undefined,
+  };
+}
+
 export async function parseWithDtk(url: string): Promise<ParsedItem> {
-  return toParsedItem(await fetchContent(url));
+  // 要 raw 只是为了读 mix_info，读完就丢掉，不返回给前端
+  const c = await runTask("/api/v1/parse", {
+    method: "POST",
+    body: JSON.stringify({ url, include_raw: true }),
+  });
+  const item = toParsedItem(c);
+  item.mix = toMixInfo(c?.raw);
+  return item;
+}
+
+// 抖音单页最多 50 条；合集再长也只取前 MIX_MAX_ITEMS 条，避免一次请求跑太久
+const MIX_PAGE_SIZE = 50;
+const MIX_MAX_ITEMS = 500;
+
+/** 翻完整个合集。第一页带 raw 用来拿合集名称，后面的页不带 */
+export async function fetchMixWithDtk(mixId: string): Promise<ParsedMix> {
+  const items: ParsedItem[] = [];
+  const seen = new Set<string>();
+  let info: MixInfo | undefined;
+  let cursor: string | undefined;
+  let truncated = false;
+
+  for (;;) {
+    const q = new URLSearchParams({ mix_id: mixId, count: String(MIX_PAGE_SIZE) });
+    if (cursor) q.set("cursor", cursor);
+    if (!info) q.set("include_raw", "true");
+    const page = await runTask(`/api/v1/douyin/mix/posts?${q.toString()}`);
+
+    for (const c of page?.items ?? []) {
+      info ??= toMixInfo(c?.raw);
+      try {
+        const item = toParsedItem(c);
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        items.push(item);
+      } catch {
+        // 删除、私密或缺媒体的那一集跳过，不影响其余
+      }
+    }
+
+    if (!page?.has_more || !page?.cursor || page.cursor === cursor) break;
+    if (items.length >= MIX_MAX_ITEMS) {
+      truncated = true;
+      break;
+    }
+    cursor = page.cursor;
+  }
+
+  if (!items.length) throw new ParseError("合集里没有可下载的作品", 404);
+  return {
+    id: mixId,
+    name: info?.name ?? "合集",
+    count: info?.count,
+    items: items.slice(0, MIX_MAX_ITEMS),
+    truncated: truncated || items.length > MIX_MAX_ITEMS || undefined,
+  };
 }
